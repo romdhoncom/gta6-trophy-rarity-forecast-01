@@ -141,9 +141,11 @@ function forecastOne(c: CaseFile): { trophies: { id: number; q: number[] }[] } {
     .sort((p, q) => Date.parse(p.slot) - Date.parse(q.slot));
   const releaseMs = Date.parse((c.game?.release_date ?? "2026-11-19") + "T00:00:00Z");
   const targetMs = Date.parse(c.target);
-  const horizonDays = Math.max(0, (c.horizon_minutes ?? 0) / 1440);
   const xTarget = logHours(targetMs, releaseMs);
   const lastMs = history.length > 0 ? Date.parse(history[history.length - 1].slot) : targetMs;
+  // The walk widens from the last read the case holds, not from the
+  // checkpoint: the case's last read can sit before its checkpoint.
+  const walkDays = Math.max(0, (targetMs - lastMs) / DAY_MS);
 
   // Trend axis and recency weights (half-life one day).
   const xs: number[] = [];
@@ -217,23 +219,19 @@ function forecastOne(c: CaseFile): { trophies: { id: number; q: number[] }[] } {
   const ses: number[] = [];
   const intercepts: number[] = [];
   const hasFit: boolean[] = [];
-  const lastRate: number[] = [];
   for (let i = 0; i < trophies.length; i++) {
     const px: number[] = [];
     const py: number[] = [];
     const pw: number[] = [];
-    let lr = 0.01;
     for (let j = 0; j < history.length; j++) {
       const rate = history[j].rates[i];
       if (typeof rate === "number" && ns[j] > 0) {
-        lr = rate;
         px.push(xs[j]);
         // Half an earner keeps a trophy nobody has yet on the log scale.
         py.push(Math.log((rate * ns[j]) / 100 + 0.5));
         pw.push(ws[j]);
       }
     }
-    lastRate.push(lr);
     if (px.length >= 2) {
       const fit = wls(px, py, pw);
       slopes.push(fit.b);
@@ -299,7 +297,7 @@ function forecastOne(c: CaseFile): { trophies: { id: number; q: number[] }[] } {
     const spread = clamp(
       Math.sqrt(
         sigmaFit * sigmaFit +
-          0.35 * 0.35 * horizonDays +
+          0.35 * 0.35 * walkDays +
           sRefresh * sRefresh,
       ),
       0.1,
